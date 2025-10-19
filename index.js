@@ -1,12 +1,22 @@
-const API_KEY = 'ak_2bc95a96301b8c07359e6debffbcffe7a14bc9a736c0e';
+const fetch = require('node-fetch');
+const API_KEY = 'ak_2bc95a06301b68c073359e6debfbbcffe7a14bca97836c0e';
 const BASE_URL = 'https://assessment.ksensetech.com/api';
 
 async function fetchPatients(page = 1, limit = 20) {
-  const response = await fetch(`${BASE_URL}/patients?page=${page}&limit=${limit}`, {
-    headers: { 'x-api-key': API_KEY }
-  });
-  if (!response.ok) throw new Error('Failed to fetch patients');
-  return response.json();
+  try {
+    const response = await fetch(`${BASE_URL}/patients?page=${page}&limit=${limit}`, {
+      headers: { 'x-api-key': API_KEY },
+      method: 'GET'
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+    return response.json();
+  } catch (error) {
+    console.error('Fetch error:', error.message);
+    throw error;
+  }
 }
 
 function calculateRiskScore(patient) {
@@ -39,7 +49,7 @@ function calculateRiskScore(patient) {
   // Age Risk
   if (typeof patient.age === 'number' && !isNaN(patient.age)) {
     if (patient.age > 65) ageScore = 2; // Over 65
-    else if (patient.age >= 40 && patient.age <= 65) ageScore = 1; // 40-65
+    else if (patient.age >= 40 && ageScore <= 65) ageScore = 1; // 40-65
     else ageScore = 0; // Under 40
   } else {
     ageScore = 0; // Invalid/Missing Data
@@ -54,10 +64,16 @@ async function processAllPatients() {
   let hasNext = true;
 
   while (hasNext) {
-    const data = await fetchPatients(page);
-    allPatients = allPatients.concat(data.data);
-    hasNext = data.pagination.hasNext;
-    page++;
+    try {
+      const data = await fetchPatients(page);
+      allPatients = allPatients.concat(data.data);
+      hasNext = data.pagination.hasNext;
+      page++;
+      if (hasNext) await new Promise(resolve => setTimeout(resolve, 1000)); // Delay to avoid rate limiting
+    } catch (error) {
+      console.error(`Error on page ${page}:`, error.message);
+      break;
+    }
   }
 
   const results = {
@@ -89,17 +105,23 @@ async function processAllPatients() {
 }
 
 async function submitResults(results) {
-  const response = await fetch(`${BASE_URL}/submit-assessment`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY
-    },
-    body: JSON.stringify(results)
-  });
-  const data = await response.json();
-  console.log('Submission Results:', data);
-  return data;
+  try {
+    const response = await fetch(`${BASE_URL}/submit-assessment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': API_KEY
+      },
+      body: JSON.stringify(results)
+    });
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const data = await response.json();
+    console.log('Submission Results:', data);
+    return data;
+  } catch (error) {
+    console.error('Submission error:', error.message);
+    throw error;
+  }
 }
 
 (async () => {
@@ -107,6 +129,6 @@ async function submitResults(results) {
     const results = await processAllPatients();
     await submitResults(results);
   } catch (error) {
-    console.error('Error:', error.message);
+    console.error('Overall error:', error.message);
   }
 })();
